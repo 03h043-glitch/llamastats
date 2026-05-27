@@ -14,7 +14,10 @@ local RESET = "|r"
 
 local frame
 local minimapButton
+local settingsPanel
+local settingsCategory
 local rows = {}
+local displayEntries = {}
 local fontStrings = {}
 
 local goldMilestones = { 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000 }
@@ -62,7 +65,59 @@ local defaults = {
         opacity = 0.85,
         scale = 1,
         textSize = 11,
+        display = {
+            questsCompleted = true,
+            mobsKilled = true,
+            damageDealt = true,
+            moneyLooted = true,
+            moneyQuestRewards = true,
+            vendorValueLooted = true,
+            deaths = true,
+            itemsLooted = true,
+            greenItems = true,
+            blueItems = true,
+            purpleItems = true,
+            highestVendorItemName = true,
+            highestVendorItemValue = true,
+            sessionQuests = true,
+            sessionKills = true,
+            sessionDamage = true,
+            sessionMoney = true,
+            sessionVendorValue = true,
+            sessionItems = true,
+            sessionGreens = true,
+            sessionBlues = true,
+            sessionPurples = true,
+        },
     },
+}
+
+local lifetimeDisplayOptions = {
+    { key = "questsCompleted", label = "Lifetime quests" },
+    { key = "mobsKilled", label = "Lifetime kills" },
+    { key = "damageDealt", label = "Lifetime damage" },
+    { key = "moneyLooted", label = "Lifetime looted coin" },
+    { key = "moneyQuestRewards", label = "Lifetime quest gold" },
+    { key = "vendorValueLooted", label = "Lifetime vendor value" },
+    { key = "deaths", label = "Lifetime deaths" },
+    { key = "itemsLooted", label = "Lifetime items" },
+    { key = "greenItems", label = "Lifetime greens" },
+    { key = "blueItems", label = "Lifetime blues" },
+    { key = "purpleItems", label = "Lifetime purples" },
+    { key = "highestVendorItemName", label = "Lifetime best item" },
+    { key = "highestVendorItemValue", label = "Lifetime best value" },
+}
+
+local sessionDisplayOptions = {
+    { key = "sessionQuests", label = "Session quests" },
+    { key = "sessionKills", label = "Session kills" },
+    { key = "sessionDamage", label = "Session damage" },
+    { key = "sessionMoney", label = "Session looted coin" },
+    { key = "sessionVendorValue", label = "Session vendor value" },
+    { key = "sessionItems", label = "Session items" },
+    { key = "sessionGreens", label = "Session greens" },
+    { key = "sessionBlues", label = "Session blues" },
+    { key = "sessionPurples", label = "Session purples" },
 }
 
 local function CopyDefaults(src, dst)
@@ -171,6 +226,65 @@ local function ApplyWindowOpacity()
     if not frame or not frame.bg then return end
     local opacity = LlamaStatsDB.window.opacity or 0.85
     frame.bg:SetColorTexture(0, 0, 0, opacity)
+end
+
+local function IsDisplayEnabled(key)
+    LlamaStatsDB.window.display = LlamaStatsDB.window.display or {}
+    return LlamaStatsDB.window.display[key] ~= false
+end
+
+local function SectionHasVisibleRows(section)
+    for _, entry in ipairs(displayEntries) do
+        if entry.type == "row" and entry.section == section and IsDisplayEnabled(entry.key) then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function ApplyStatsDisplay()
+    if not frame then return end
+
+    local y = -38
+    local anyVisible = false
+
+    for _, entry in ipairs(displayEntries) do
+        if entry.type == "section" then
+            entry.visible = SectionHasVisibleRows(entry.key)
+
+            if entry.visible then
+                if anyVisible then
+                    y = y - 14
+                end
+
+                entry.fs:ClearAllPoints()
+                entry.fs:SetPoint("TOPLEFT", 12, y)
+                entry.fs:Show()
+                y = y - 24
+                anyVisible = true
+            else
+                entry.fs:Hide()
+            end
+        elseif entry.type == "row" then
+            local visible = IsDisplayEnabled(entry.key)
+
+            if visible then
+                entry.left:ClearAllPoints()
+                entry.right:ClearAllPoints()
+                entry.left:SetPoint("TOPLEFT", 14, y)
+                entry.right:SetPoint("TOPRIGHT", -14, y)
+                entry.left:Show()
+                entry.right:Show()
+                y = y - 18
+            else
+                entry.left:Hide()
+                entry.right:Hide()
+            end
+        end
+    end
+
+    frame:SetHeight(math.max(82, math.abs(y) + 22))
 end
 
 local function UpdateUI()
@@ -332,6 +446,122 @@ local function ToggleWindow()
     end
 end
 
+local function OpenSettingsPanel()
+    if Settings and Settings.OpenToCategory then
+        local category = settingsCategory
+        if category and category.GetID then
+            category = category:GetID()
+        end
+        category = category or "LlamaStats"
+        Settings.OpenToCategory(category)
+        Settings.OpenToCategory(category)
+    elseif InterfaceOptionsFrame_OpenToCategory and settingsPanel then
+        InterfaceOptionsFrame_OpenToCategory(settingsPanel)
+        InterfaceOptionsFrame_OpenToCategory(settingsPanel)
+    else
+        Print("Open the WoW AddOns settings and select LlamaStats.")
+    end
+end
+
+local function CreateDisplayCheckbox(parent, option, x, y)
+    local check = CreateFrame("CheckButton", "LlamaStatsDisplay" .. option.key, parent, "InterfaceOptionsCheckButtonTemplate")
+    check:SetPoint("TOPLEFT", x, y)
+
+    local text = check.Text or _G[check:GetName() .. "Text"]
+    if text then
+        text:SetText(option.label)
+    end
+
+    check:SetScript("OnClick", function(self)
+        LlamaStatsDB.window.display[option.key] = self:GetChecked() and true or false
+        ApplyStatsDisplay()
+    end)
+
+    parent.checkboxes[option.key] = check
+end
+
+local function CreateSettingsPanel()
+    if settingsPanel then return end
+
+    settingsPanel = CreateFrame("Frame", "LlamaStatsSettingsPanel")
+    settingsPanel.name = "LlamaStats"
+    settingsPanel.checkboxes = {}
+
+    local title = settingsPanel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("LlamaStats")
+
+    local opacityLabel = settingsPanel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    opacityLabel:SetPoint("TOPLEFT", 16, -52)
+    opacityLabel:SetText("Tracker window opacity")
+
+    local slider = CreateFrame("Slider", "LlamaStatsOpacitySlider", settingsPanel, "OptionsSliderTemplate")
+    slider:SetPoint("TOPLEFT", 22, -80)
+    slider:SetWidth(220)
+    slider:SetMinMaxValues(0, 100)
+    slider:SetValueStep(5)
+    if slider.SetObeyStepOnDrag then
+        slider:SetObeyStepOnDrag(true)
+    end
+
+    if _G[slider:GetName() .. "Low"] then
+        _G[slider:GetName() .. "Low"]:SetText("0%")
+    end
+
+    if _G[slider:GetName() .. "High"] then
+        _G[slider:GetName() .. "High"]:SetText("100%")
+    end
+
+    local sliderText = _G[slider:GetName() .. "Text"]
+    slider:SetScript("OnValueChanged", function(self, value)
+        value = math.floor((value or 0) + 0.5)
+        LlamaStatsDB.window.opacity = value / 100
+        if sliderText then
+            sliderText:SetText(value .. "%")
+        end
+        ApplyWindowOpacity()
+    end)
+
+    settingsPanel.opacitySlider = slider
+
+    local lifetimeTitle = settingsPanel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    lifetimeTitle:SetPoint("TOPLEFT", 16, -130)
+    lifetimeTitle:SetText("Lifetime Display")
+
+    local sessionTitle = settingsPanel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    sessionTitle:SetPoint("TOPLEFT", 300, -130)
+    sessionTitle:SetText("Session Display")
+
+    local y = -154
+    for _, option in ipairs(lifetimeDisplayOptions) do
+        CreateDisplayCheckbox(settingsPanel, option, 16, y)
+        y = y - 24
+    end
+
+    y = -154
+    for _, option in ipairs(sessionDisplayOptions) do
+        CreateDisplayCheckbox(settingsPanel, option, 300, y)
+        y = y - 24
+    end
+
+    settingsPanel:SetScript("OnShow", function(self)
+        CopyDefaults(defaults, LlamaStatsDB)
+
+        self.opacitySlider:SetValue(math.floor((LlamaStatsDB.window.opacity or 0.85) * 100 + 0.5))
+
+        for key, check in pairs(self.checkboxes) do
+            check:SetChecked(IsDisplayEnabled(key))
+        end
+    end)
+
+    if Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory then
+        settingsCategory = Settings.RegisterCanvasLayoutCategory(settingsPanel, "LlamaStats")
+        Settings.RegisterAddOnCategory(settingsCategory)
+    elseif InterfaceOptions_AddCategory then
+        InterfaceOptions_AddCategory(settingsPanel)
+    end
+end
+
 SLASH_LLAMASTATS1 = "/llamastats"
 SLASH_LLAMASTATS2 = "/llama"
 
@@ -352,8 +582,14 @@ SlashCmdList["LLAMASTATS"] = function(msg)
         ApplyWindowOpacity()
         ApplyWindowScale()
         ApplyTextSize()
+        ApplyStatsDisplay()
         UpdateUI()
         Print("All stats reset.")
+        return
+    end
+
+    if msg == "options" or msg == "settings" then
+        OpenSettingsPanel()
         return
     end
 
@@ -436,7 +672,7 @@ SlashCmdList["LLAMASTATS"] = function(msg)
     ToggleWindow()
 end
 
-local function CreateRow(key, label, y, colour)
+local function CreateRow(section, key, label, y, colour)
     local left = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     left:SetPoint("TOPLEFT", 14, y)
     left:SetText((colour or WHITE) .. label .. RESET)
@@ -447,16 +683,18 @@ local function CreateRow(key, label, y, colour)
 
     table.insert(fontStrings, left)
     table.insert(fontStrings, right)
+    table.insert(displayEntries, { type = "row", section = section, key = key, left = left, right = right })
 
     rows[key] = right
 end
 
-local function CreateSection(text, y)
+local function CreateSection(key, text, y)
     local fs = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     fs:SetPoint("TOPLEFT", 12, y)
     fs:SetText(YELLOW .. text .. RESET)
 
     table.insert(fontStrings, fs)
+    table.insert(displayEntries, { type = "section", key = key, fs = fs })
 end
 
 local function CreateBorder(parent)
@@ -516,35 +754,36 @@ local function CreateMainWindow()
     close:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
     close:SetScript("OnClick", function() frame:Hide() end)
 
-    CreateSection("Lifetime", -38)
-    CreateRow("questsCompleted", "Quests:", -62)
-    CreateRow("mobsKilled", "Kills:", -80)
-    CreateRow("damageDealt", "Damage:", -98)
-    CreateRow("moneyLooted", "Looted coin:", -116)
-    CreateRow("moneyQuestRewards", "Quest gold:", -134)
-    CreateRow("vendorValueLooted", "Vendor value:", -152)
-    CreateRow("deaths", "Deaths:", -170)
-    CreateRow("itemsLooted", "Items:", -188)
-    CreateRow("greenItems", "Greens:", -206, GREEN)
-    CreateRow("blueItems", "Blues:", -224, BLUE)
-    CreateRow("purpleItems", "Purples:", -242, PURPLE)
-    CreateRow("highestVendorItemName", "Best item:", -260)
-    CreateRow("highestVendorItemValue", "Best value:", -278)
+    CreateSection("lifetime", "Lifetime", -38)
+    CreateRow("lifetime", "questsCompleted", "Quests:", -62)
+    CreateRow("lifetime", "mobsKilled", "Kills:", -80)
+    CreateRow("lifetime", "damageDealt", "Damage:", -98)
+    CreateRow("lifetime", "moneyLooted", "Looted coin:", -116)
+    CreateRow("lifetime", "moneyQuestRewards", "Quest gold:", -134)
+    CreateRow("lifetime", "vendorValueLooted", "Vendor value:", -152)
+    CreateRow("lifetime", "deaths", "Deaths:", -170)
+    CreateRow("lifetime", "itemsLooted", "Items:", -188)
+    CreateRow("lifetime", "greenItems", "Greens:", -206, GREEN)
+    CreateRow("lifetime", "blueItems", "Blues:", -224, BLUE)
+    CreateRow("lifetime", "purpleItems", "Purples:", -242, PURPLE)
+    CreateRow("lifetime", "highestVendorItemName", "Best item:", -260)
+    CreateRow("lifetime", "highestVendorItemValue", "Best value:", -278)
 
-    CreateSection("Session", -310)
-    CreateRow("sessionQuests", "Quests:", -334)
-    CreateRow("sessionKills", "Kills:", -352)
-    CreateRow("sessionDamage", "Damage:", -370)
-    CreateRow("sessionMoney", "Looted coin:", -388)
-    CreateRow("sessionVendorValue", "Vendor value:", -406)
-    CreateRow("sessionItems", "Items:", -424)
-    CreateRow("sessionGreens", "Greens:", -442, GREEN)
-    CreateRow("sessionBlues", "Blues:", -460, BLUE)
-    CreateRow("sessionPurples", "Purples:", -478, PURPLE)
+    CreateSection("session", "Session", -310)
+    CreateRow("session", "sessionQuests", "Quests:", -334)
+    CreateRow("session", "sessionKills", "Kills:", -352)
+    CreateRow("session", "sessionDamage", "Damage:", -370)
+    CreateRow("session", "sessionMoney", "Looted coin:", -388)
+    CreateRow("session", "sessionVendorValue", "Vendor value:", -406)
+    CreateRow("session", "sessionItems", "Items:", -424)
+    CreateRow("session", "sessionGreens", "Greens:", -442, GREEN)
+    CreateRow("session", "sessionBlues", "Blues:", -460, BLUE)
+    CreateRow("session", "sessionPurples", "Purples:", -478, PURPLE)
 
     ApplyTextSize()
     ApplyWindowOpacity()
     ApplyWindowScale()
+    ApplyStatsDisplay()
     frame:Hide()
 end
 
@@ -570,7 +809,7 @@ local function CreateMinimapButton()
         if button == "LeftButton" then
             ToggleWindow()
         else
-            Print("/llama, /llama opacity 0-100, /llama scale 50-200, /llama text 8-24")
+            Print("/llama, /llama settings, /llama opacity 0-100, /llama scale 50-200, /llama text 8-24")
         end
     end)
 
@@ -614,6 +853,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         CopyDefaults(defaults, LlamaStatsDB)
         CreateMainWindow()
         CreateMinimapButton()
+        CreateSettingsPanel()
         UpdateUI()
         Print("Ready. Use /llama")
         return
