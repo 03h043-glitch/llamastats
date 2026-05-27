@@ -5,3 +5,4 @@
 ## SavedVariablesPerCharacter: LlamaStatsDB
 
 LlamaStats.lua
+LlamaStatsSessionButtons.lua
