@@ -103,9 +103,8 @@ local function AddSessionButtons()
         return false
     end
 
-    local totalWidth = (BUTTON_WIDTH * 2) + BUTTON_GAP
-    local firstX = -(totalWidth / 2)
-    local secondX = firstX + BUTTON_WIDTH + BUTTON_GAP
+    local firstX = -((BUTTON_WIDTH + BUTTON_GAP) / 2)
+    local secondX = (BUTTON_WIDTH + BUTTON_GAP) / 2
 
     local newSession = CreateSessionButton(frame, 'LlamaStatsNewSessionButton', 'New Session', 'BOTTOM', 'BOTTOM', firstX)
     newSession:SetScript('OnClick', function()
