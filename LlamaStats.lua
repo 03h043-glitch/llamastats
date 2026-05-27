@@ -19,6 +19,10 @@ local settingsCategory
 local rows = {}
 local displayEntries = {}
 local fontStrings = {}
+local lastXP
+local lastXPMax
+local lastLevel
+local uiTick = 0
 
 local goldMilestones = { 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000 }
 local itemMilestones = { 10, 25, 50, 100, 250, 500, 1000, 2500, 5000 }
@@ -40,17 +44,21 @@ local defaults = {
         highestVendorItemName = "None",
         highestVendorItemValue = 0,
         damageDealt = 0,
+        experienceGained = 0,
     },
     session = {
+        startedAt = 0,
         questsCompleted = 0,
         mobsKilled = 0,
         moneyLooted = 0,
+        moneyQuestRewards = 0,
         vendorValueLooted = 0,
         itemsLooted = 0,
         greenItems = 0,
         blueItems = 0,
         purpleItems = 0,
         damageDealt = 0,
+        experienceGained = 0,
     },
     mobs = {},
     milestones = {
@@ -79,10 +87,15 @@ local defaults = {
             purpleItems = true,
             highestVendorItemName = true,
             highestVendorItemValue = true,
+            sessionLength = true,
             sessionQuests = true,
             sessionKills = true,
             sessionDamage = true,
+            sessionExperience = true,
+            sessionExpPerHour = true,
             sessionMoney = true,
+            sessionQuestGold = true,
+            sessionGoldPerHour = true,
             sessionVendorValue = true,
             sessionItems = true,
             sessionGreens = true,
@@ -109,10 +122,15 @@ local lifetimeDisplayOptions = {
 }
 
 local sessionDisplayOptions = {
+    { key = "sessionLength", label = "Session length" },
     { key = "sessionQuests", label = "Session quests" },
     { key = "sessionKills", label = "Session kills" },
     { key = "sessionDamage", label = "Session damage" },
+    { key = "sessionExperience", label = "Session XP" },
+    { key = "sessionExpPerHour", label = "Session XP/hour" },
     { key = "sessionMoney", label = "Session looted coin" },
+    { key = "sessionQuestGold", label = "Session quest gold" },
+    { key = "sessionGoldPerHour", label = "Session gold/hour" },
     { key = "sessionVendorValue", label = "Session vendor value" },
     { key = "sessionItems", label = "Session items" },
     { key = "sessionGreens", label = "Session greens" },
@@ -143,6 +161,14 @@ local function Popup(msg, r, g, b)
     Print(msg)
 end
 
+local function CurrentTime()
+    if time then
+        return time()
+    end
+
+    return math.floor(GetTime() or 0)
+end
+
 local function FormatNumber(n)
     n = tonumber(n) or 0
 
@@ -156,7 +182,7 @@ local function FormatNumber(n)
 end
 
 local function MoneyText(copper)
-    copper = copper or 0
+    copper = math.floor(tonumber(copper) or 0)
 
     local g = math.floor(copper / 10000)
     local s = math.floor((copper % 10000) / 100)
@@ -178,7 +204,7 @@ local function MoneyText(copper)
 end
 
 local function PlainMoneyText(copper)
-    copper = copper or 0
+    copper = math.floor(tonumber(copper) or 0)
     local g = math.floor(copper / 10000)
     local s = math.floor((copper % 10000) / 100)
     local c = copper % 100
@@ -186,6 +212,61 @@ local function PlainMoneyText(copper)
     if g > 0 then return g .. "g " .. s .. "s " .. c .. "c" end
     if s > 0 then return s .. "s " .. c .. "c" end
     return c .. "c"
+end
+
+local function FormatDuration(seconds)
+    seconds = math.max(0, math.floor(tonumber(seconds) or 0))
+    local hours = math.floor(seconds / 3600)
+    local minutes = math.floor((seconds % 3600) / 60)
+    local secs = seconds % 60
+
+    if hours > 0 then
+        return string.format("%dh %02dm %02ds", hours, minutes, secs)
+    end
+
+    return string.format("%dm %02ds", minutes, secs)
+end
+
+local function FormatPerHour(value, elapsed)
+    value = tonumber(value) or 0
+    elapsed = math.max(1, tonumber(elapsed) or 0)
+    return FormatNumber((value * 3600) / elapsed)
+end
+
+local function MoneyPerHourText(copper, elapsed)
+    copper = tonumber(copper) or 0
+    elapsed = math.max(1, tonumber(elapsed) or 0)
+    return MoneyText((copper * 3600) / elapsed)
+end
+
+local function GetSessionElapsedSeconds()
+    local startedAt = LlamaStatsDB.session and LlamaStatsDB.session.startedAt or CurrentTime()
+    return math.max(0, CurrentTime() - (startedAt or CurrentTime()))
+end
+
+local function GetSessionGoldGained()
+    local s = LlamaStatsDB.session or {}
+    return (s.moneyLooted or 0) + (s.moneyQuestRewards or 0)
+end
+
+local function RefreshExperienceSnapshot()
+    if UnitXP then
+        lastXP = UnitXP("player") or 0
+    else
+        lastXP = 0
+    end
+
+    if UnitXPMax then
+        lastXPMax = UnitXPMax("player") or 0
+    else
+        lastXPMax = 0
+    end
+
+    if UnitLevel then
+        lastLevel = UnitLevel("player") or 0
+    else
+        lastLevel = 0
+    end
 end
 
 local function ApplyTextSize()
@@ -207,19 +288,23 @@ end
 
 local function ResetSession()
     LlamaStatsDB.session = {
+        startedAt = CurrentTime(),
         questsCompleted = 0,
         mobsKilled = 0,
         moneyLooted = 0,
+        moneyQuestRewards = 0,
         vendorValueLooted = 0,
         itemsLooted = 0,
         greenItems = 0,
         blueItems = 0,
         purpleItems = 0,
         damageDealt = 0,
+        experienceGained = 0,
     }
 
     LlamaStatsDB.milestones = LlamaStatsDB.milestones or {}
     LlamaStatsDB.milestones.session = {}
+    RefreshExperienceSnapshot()
 end
 
 local function ApplyWindowOpacity()
@@ -292,6 +377,7 @@ local function UpdateUI()
 
     local l = LlamaStatsDB.lifetime
     local s = LlamaStatsDB.session
+    local elapsed = GetSessionElapsedSeconds()
 
     rows.questsCompleted:SetText(l.questsCompleted or 0)
     rows.mobsKilled:SetText(l.mobsKilled or 0)
@@ -307,15 +393,35 @@ local function UpdateUI()
     rows.highestVendorItemName:SetText(l.highestVendorItemName or "None")
     rows.highestVendorItemValue:SetText(MoneyText(l.highestVendorItemValue or 0))
 
+    rows.sessionLength:SetText(FormatDuration(elapsed))
     rows.sessionQuests:SetText(s.questsCompleted or 0)
     rows.sessionKills:SetText(s.mobsKilled or 0)
     rows.sessionDamage:SetText(FormatNumber(s.damageDealt or 0))
+    rows.sessionExperience:SetText(FormatNumber(s.experienceGained or 0))
+    rows.sessionExpPerHour:SetText(FormatPerHour(s.experienceGained or 0, elapsed))
     rows.sessionMoney:SetText(MoneyText(s.moneyLooted or 0))
+    rows.sessionQuestGold:SetText(MoneyText(s.moneyQuestRewards or 0))
+    rows.sessionGoldPerHour:SetText(MoneyPerHourText(GetSessionGoldGained(), elapsed))
     rows.sessionVendorValue:SetText(MoneyText(s.vendorValueLooted or 0))
     rows.sessionItems:SetText(s.itemsLooted or 0)
     rows.sessionGreens:SetText(GREEN .. (s.greenItems or 0) .. RESET)
     rows.sessionBlues:SetText(BLUE .. (s.blueItems or 0) .. RESET)
     rows.sessionPurples:SetText(PURPLE .. (s.purpleItems or 0) .. RESET)
+end
+
+local function SendLifetimeMilestonePartyMessage(msg)
+    if not SendChatMessage then return end
+
+    local inGroup = false
+    if IsInGroup then
+        inGroup = IsInGroup()
+    elseif GetNumGroupMembers then
+        inGroup = (GetNumGroupMembers() or 0) > 0
+    end
+
+    if inGroup then
+        SendChatMessage(msg, "PARTY")
+    end
 end
 
 local function CheckMilestones(scope, key, value, thresholds, label, formatter, r, g, b)
@@ -326,7 +432,13 @@ local function CheckMilestones(scope, key, value, thresholds, label, formatter, 
     for _, threshold in ipairs(thresholds) do
         if value >= threshold and not LlamaStatsDB.milestones[scope][key][threshold] then
             LlamaStatsDB.milestones[scope][key][threshold] = true
-            Popup("LlamaStats: " .. scope .. " " .. label .. " reached " .. ((formatter and formatter(threshold)) or threshold) .. "!", r, g, b)
+            local milestoneValue = (formatter and formatter(threshold)) or threshold
+            local msg = "LlamaStats: " .. scope .. " " .. label .. " reached " .. milestoneValue .. "!"
+            Popup(msg, r, g, b)
+
+            if scope == "lifetime" then
+                SendLifetimeMilestonePartyMessage(msg)
+            end
         end
     end
 end
@@ -371,6 +483,15 @@ local function AddLifetimeOnly(key, amount)
     LlamaStatsDB.lifetime[key] = (LlamaStatsDB.lifetime[key] or 0) + amount
     UpdateUI()
     RunMilestoneChecks(key)
+end
+
+local function AddExperience(amount)
+    amount = math.floor(tonumber(amount) or 0)
+    if amount <= 0 then return end
+
+    LlamaStatsDB.lifetime.experienceGained = (LlamaStatsDB.lifetime.experienceGained or 0) + amount
+    LlamaStatsDB.session.experienceGained = (LlamaStatsDB.session.experienceGained or 0) + amount
+    UpdateUI()
 end
 
 local function ParseMoneyMessage(msg)
@@ -432,6 +553,28 @@ local function GetDamageAmountFromCombatLog(args, subEvent)
     end
 
     return 0
+end
+
+local function HandleExperienceUpdate()
+    if not UnitXP or not UnitXPMax or not UnitLevel then return end
+
+    local currentXP = UnitXP("player") or 0
+    local currentMaxXP = UnitXPMax("player") or 0
+    local currentLevel = UnitLevel("player") or 0
+    local gained = 0
+
+    if lastXP ~= nil and lastLevel ~= nil then
+        if currentLevel > lastLevel then
+            gained = math.max(0, (lastXPMax or 0) - (lastXP or 0)) + currentXP
+        elseif currentLevel == lastLevel and currentXP > (lastXP or 0) then
+            gained = currentXP - (lastXP or 0)
+        end
+    end
+
+    lastXP = currentXP
+    lastXPMax = currentMaxXP
+    lastLevel = currentLevel
+    AddExperience(gained)
 end
 
 local function ToggleWindow()
@@ -727,7 +870,7 @@ end
 
 local function CreateMainWindow()
     frame = CreateFrame("Frame", "LlamaStatsFrame", UIParent)
-    frame:SetSize(270, 500)
+    frame:SetSize(270, 570)
     frame:SetPoint("CENTER")
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -754,6 +897,14 @@ local function CreateMainWindow()
     close:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
     close:SetScript("OnClick", function() frame:Hide() end)
 
+    frame:SetScript("OnUpdate", function(_, elapsed)
+        uiTick = uiTick + (elapsed or 0)
+        if uiTick >= 1 then
+            uiTick = 0
+            UpdateUI()
+        end
+    end)
+
     CreateSection("lifetime", "Lifetime", -38)
     CreateRow("lifetime", "questsCompleted", "Quests:", -62)
     CreateRow("lifetime", "mobsKilled", "Kills:", -80)
@@ -770,15 +921,20 @@ local function CreateMainWindow()
     CreateRow("lifetime", "highestVendorItemValue", "Best value:", -278)
 
     CreateSection("session", "Session", -310)
-    CreateRow("session", "sessionQuests", "Quests:", -334)
-    CreateRow("session", "sessionKills", "Kills:", -352)
-    CreateRow("session", "sessionDamage", "Damage:", -370)
-    CreateRow("session", "sessionMoney", "Looted coin:", -388)
-    CreateRow("session", "sessionVendorValue", "Vendor value:", -406)
-    CreateRow("session", "sessionItems", "Items:", -424)
-    CreateRow("session", "sessionGreens", "Greens:", -442, GREEN)
-    CreateRow("session", "sessionBlues", "Blues:", -460, BLUE)
-    CreateRow("session", "sessionPurples", "Purples:", -478, PURPLE)
+    CreateRow("session", "sessionLength", "Length:", -334)
+    CreateRow("session", "sessionQuests", "Quests:", -352)
+    CreateRow("session", "sessionKills", "Kills:", -370)
+    CreateRow("session", "sessionDamage", "Damage:", -388)
+    CreateRow("session", "sessionExperience", "XP:", -406)
+    CreateRow("session", "sessionExpPerHour", "XP/hr:", -424)
+    CreateRow("session", "sessionMoney", "Looted coin:", -442)
+    CreateRow("session", "sessionQuestGold", "Quest gold:", -460)
+    CreateRow("session", "sessionGoldPerHour", "Gold/hr:", -478)
+    CreateRow("session", "sessionVendorValue", "Vendor value:", -496)
+    CreateRow("session", "sessionItems", "Items:", -514)
+    CreateRow("session", "sessionGreens", "Greens:", -532, GREEN)
+    CreateRow("session", "sessionBlues", "Blues:", -550, BLUE)
+    CreateRow("session", "sessionPurples", "Purples:", -568, PURPLE)
 
     ApplyTextSize()
     ApplyWindowOpacity()
@@ -833,6 +989,7 @@ end
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_XP_UPDATE")
 eventFrame:RegisterEvent("QUEST_TURNED_IN")
 eventFrame:RegisterEvent("PLAYER_DEAD")
 eventFrame:RegisterEvent("CHAT_MSG_MONEY")
@@ -844,18 +1001,23 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         local addon = ...
         if addon == "LlamaStats" then
             CopyDefaults(defaults, LlamaStatsDB)
-            ResetSession()
         end
         return
     end
 
     if event == "PLAYER_LOGIN" then
         CopyDefaults(defaults, LlamaStatsDB)
+        ResetSession()
         CreateMainWindow()
         CreateMinimapButton()
         CreateSettingsPanel()
         UpdateUI()
         Print("Ready. Use /llama")
+        return
+    end
+
+    if event == "PLAYER_XP_UPDATE" then
+        HandleExperienceUpdate()
         return
     end
 
