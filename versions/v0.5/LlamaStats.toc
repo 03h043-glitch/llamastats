@@ -1,7 +1,7 @@
 ## Interface: 11507
 ## Title: LlamaStats
 ## Notes: Per-character RuneScape-style stat tracker
-## Version: 0.6
+## Version: 0.5
 ## SavedVariablesPerCharacter: LlamaStatsDB
 
 LlamaStats.lua

@@ -25,7 +25,6 @@ local function ResetSessionData()
         startedAt = CurrentTime(),
         questsCompleted = 0,
         mobsKilled = 0,
-        mobTypes = {},
         moneyLooted = 0,
         moneyQuestRewards = 0,
         vendorValueLooted = 0,

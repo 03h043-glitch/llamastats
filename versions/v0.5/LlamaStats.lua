@@ -23,19 +23,16 @@ local lastXP
 local lastXPMax
 local lastLevel
 local uiTick = 0
-local knownMobTypes = {}
 
 local goldMilestones = { 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000 }
 local itemMilestones = { 10, 25, 50, 100, 250, 500, 1000, 2500, 5000 }
 local qualityMilestones = { 1, 5, 10, 25, 50, 100, 250 }
 local damageMilestones = { 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000 }
-local mobTypeMilestones = { 10, 25, 50, 100, 250, 500, 1000, 2500, 5000 }
 
 local defaults = {
     lifetime = {
         questsCompleted = 0,
         mobsKilled = 0,
-        mobTypes = {},
         moneyLooted = 0,
         moneyQuestRewards = 0,
         vendorValueLooted = 0,
@@ -53,7 +50,6 @@ local defaults = {
         startedAt = 0,
         questsCompleted = 0,
         mobsKilled = 0,
-        mobTypes = {},
         moneyLooted = 0,
         moneyQuestRewards = 0,
         vendorValueLooted = 0,
@@ -80,7 +76,6 @@ local defaults = {
         display = {
             questsCompleted = true,
             mobsKilled = true,
-            topMobType = true,
             damageDealt = true,
             moneyLooted = true,
             moneyQuestRewards = true,
@@ -95,7 +90,6 @@ local defaults = {
             sessionLength = true,
             sessionQuests = true,
             sessionKills = true,
-            sessionTopMobType = true,
             sessionDamage = true,
             sessionExperience = true,
             sessionExpPerHour = true,
@@ -114,7 +108,6 @@ local defaults = {
 local lifetimeDisplayOptions = {
     { key = "questsCompleted", label = "Lifetime quests" },
     { key = "mobsKilled", label = "Lifetime kills" },
-    { key = "topMobType", label = "Lifetime top mob type" },
     { key = "damageDealt", label = "Lifetime damage" },
     { key = "moneyLooted", label = "Lifetime looted coin" },
     { key = "moneyQuestRewards", label = "Lifetime quest gold" },
@@ -132,7 +125,6 @@ local sessionDisplayOptions = {
     { key = "sessionLength", label = "Session length" },
     { key = "sessionQuests", label = "Session quests" },
     { key = "sessionKills", label = "Session kills" },
-    { key = "sessionTopMobType", label = "Session top mob type" },
     { key = "sessionDamage", label = "Session damage" },
     { key = "sessionExperience", label = "Session XP" },
     { key = "sessionExpPerHour", label = "Session XP/hour" },
@@ -277,63 +269,6 @@ local function RefreshExperienceSnapshot()
     end
 end
 
-local function NormalizeMobType(creatureType)
-    creatureType = creatureType or ""
-    if creatureType == "" or creatureType == "Not specified" then
-        return "Unknown"
-    end
-
-    return creatureType
-end
-
-local function RememberUnitMobType(unit)
-    if not unit or not UnitGUID or not UnitCreatureType then return end
-    if not UnitExists or not UnitExists(unit) then return end
-
-    local guid = UnitGUID(unit)
-    if not guid then return end
-
-    knownMobTypes[guid] = NormalizeMobType(UnitCreatureType(unit))
-end
-
-local function RememberVisibleMobTypes()
-    RememberUnitMobType("target")
-    RememberUnitMobType("mouseover")
-    RememberUnitMobType("focus")
-
-    for i = 1, 40 do
-        RememberUnitMobType("nameplate" .. i)
-    end
-end
-
-local function GetMobTypeForGuid(guid)
-    if guid and knownMobTypes[guid] then
-        return knownMobTypes[guid]
-    end
-
-    RememberVisibleMobTypes()
-    return (guid and knownMobTypes[guid]) or "Unknown"
-end
-
-local function GetTopMobTypeText(mobTypes)
-    local topType = nil
-    local topCount = 0
-
-    for creatureType, count in pairs(mobTypes or {}) do
-        count = tonumber(count) or 0
-        if count > topCount then
-            topType = creatureType
-            topCount = count
-        end
-    end
-
-    if not topType then
-        return "None"
-    end
-
-    return topType .. " (" .. topCount .. ")"
-end
-
 local function ApplyTextSize()
     local size = LlamaStatsDB.window.textSize or 11
     local font = "Fonts\\FRIZQT__.TTF"
@@ -356,7 +291,6 @@ local function ResetSession()
         startedAt = CurrentTime(),
         questsCompleted = 0,
         mobsKilled = 0,
-        mobTypes = {},
         moneyLooted = 0,
         moneyQuestRewards = 0,
         vendorValueLooted = 0,
@@ -447,7 +381,6 @@ local function UpdateUI()
 
     rows.questsCompleted:SetText(l.questsCompleted or 0)
     rows.mobsKilled:SetText(l.mobsKilled or 0)
-    rows.topMobType:SetText(GetTopMobTypeText(l.mobTypes))
     rows.damageDealt:SetText(FormatNumber(l.damageDealt or 0))
     rows.moneyLooted:SetText(MoneyText(l.moneyLooted or 0))
     rows.moneyQuestRewards:SetText(MoneyText(l.moneyQuestRewards or 0))
@@ -463,7 +396,6 @@ local function UpdateUI()
     rows.sessionLength:SetText(FormatDuration(elapsed))
     rows.sessionQuests:SetText(s.questsCompleted or 0)
     rows.sessionKills:SetText(s.mobsKilled or 0)
-    rows.sessionTopMobType:SetText(GetTopMobTypeText(s.mobTypes))
     rows.sessionDamage:SetText(FormatNumber(s.damageDealt or 0))
     rows.sessionExperience:SetText(FormatNumber(s.experienceGained or 0))
     rows.sessionExpPerHour:SetText(FormatPerHour(s.experienceGained or 0, elapsed))
@@ -538,14 +470,6 @@ local function RunMilestoneChecks(key)
     end
 end
 
-local function CheckMobTypeMilestones(creatureType)
-    creatureType = NormalizeMobType(creatureType)
-    local milestoneKey = "mobType:" .. creatureType
-
-    CheckMilestones("lifetime", milestoneKey, LlamaStatsDB.lifetime.mobTypes[creatureType] or 0, mobTypeMilestones, creatureType .. " kills", nil, 1, 0.45, 0.1)
-    CheckMilestones("session", milestoneKey, LlamaStatsDB.session.mobTypes[creatureType] or 0, mobTypeMilestones, creatureType .. " kills", nil, 1, 0.45, 0.1)
-end
-
 local function AddStat(key, amount)
     amount = amount or 1
     LlamaStatsDB.lifetime[key] = (LlamaStatsDB.lifetime[key] or 0) + amount
@@ -559,17 +483,6 @@ local function AddLifetimeOnly(key, amount)
     LlamaStatsDB.lifetime[key] = (LlamaStatsDB.lifetime[key] or 0) + amount
     UpdateUI()
     RunMilestoneChecks(key)
-end
-
-local function AddMobType(creatureType, amount)
-    amount = amount or 1
-    creatureType = NormalizeMobType(creatureType)
-    LlamaStatsDB.lifetime.mobTypes = LlamaStatsDB.lifetime.mobTypes or {}
-    LlamaStatsDB.session.mobTypes = LlamaStatsDB.session.mobTypes or {}
-    LlamaStatsDB.lifetime.mobTypes[creatureType] = (LlamaStatsDB.lifetime.mobTypes[creatureType] or 0) + amount
-    LlamaStatsDB.session.mobTypes[creatureType] = (LlamaStatsDB.session.mobTypes[creatureType] or 0) + amount
-    UpdateUI()
-    CheckMobTypeMilestones(creatureType)
 end
 
 local function AddExperience(amount)
@@ -843,29 +756,6 @@ SlashCmdList["LLAMASTATS"] = function(msg)
         return
     end
 
-    if msg == "top types" or msg == "top mob types" then
-        Print("Top lifetime mob types:")
-
-        local temp = {}
-        for creatureType, count in pairs(LlamaStatsDB.lifetime.mobTypes or {}) do
-            table.insert(temp, { name = creatureType, count = count })
-        end
-
-        table.sort(temp, function(a, b)
-            return a.count > b.count
-        end)
-
-        for i = 1, math.min(10, #temp) do
-            Print(i .. ". " .. temp[i].name .. " - " .. temp[i].count)
-        end
-
-        if #temp == 0 then
-            Print("No mob types tracked yet.")
-        end
-
-        return
-    end
-
     if msg == "hide minimap" then
         LlamaStatsDB.minimap.hide = true
         if minimapButton then minimapButton:Hide() end
@@ -980,7 +870,7 @@ end
 
 local function CreateMainWindow()
     frame = CreateFrame("Frame", "LlamaStatsFrame", UIParent)
-    frame:SetSize(280, 610)
+    frame:SetSize(270, 570)
     frame:SetPoint("CENTER")
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -1018,35 +908,33 @@ local function CreateMainWindow()
     CreateSection("lifetime", "Lifetime", -38)
     CreateRow("lifetime", "questsCompleted", "Quests:", -62)
     CreateRow("lifetime", "mobsKilled", "Kills:", -80)
-    CreateRow("lifetime", "topMobType", "Top type:", -98)
-    CreateRow("lifetime", "damageDealt", "Damage:", -116)
-    CreateRow("lifetime", "moneyLooted", "Looted coin:", -134)
-    CreateRow("lifetime", "moneyQuestRewards", "Quest gold:", -152)
-    CreateRow("lifetime", "vendorValueLooted", "Vendor value:", -170)
-    CreateRow("lifetime", "deaths", "Deaths:", -188)
-    CreateRow("lifetime", "itemsLooted", "Items:", -206)
-    CreateRow("lifetime", "greenItems", "Greens:", -224, GREEN)
-    CreateRow("lifetime", "blueItems", "Blues:", -242, BLUE)
-    CreateRow("lifetime", "purpleItems", "Purples:", -260, PURPLE)
-    CreateRow("lifetime", "highestVendorItemName", "Best item:", -278)
-    CreateRow("lifetime", "highestVendorItemValue", "Best value:", -296)
+    CreateRow("lifetime", "damageDealt", "Damage:", -98)
+    CreateRow("lifetime", "moneyLooted", "Looted coin:", -116)
+    CreateRow("lifetime", "moneyQuestRewards", "Quest gold:", -134)
+    CreateRow("lifetime", "vendorValueLooted", "Vendor value:", -152)
+    CreateRow("lifetime", "deaths", "Deaths:", -170)
+    CreateRow("lifetime", "itemsLooted", "Items:", -188)
+    CreateRow("lifetime", "greenItems", "Greens:", -206, GREEN)
+    CreateRow("lifetime", "blueItems", "Blues:", -224, BLUE)
+    CreateRow("lifetime", "purpleItems", "Purples:", -242, PURPLE)
+    CreateRow("lifetime", "highestVendorItemName", "Best item:", -260)
+    CreateRow("lifetime", "highestVendorItemValue", "Best value:", -278)
 
-    CreateSection("session", "Session", -328)
-    CreateRow("session", "sessionLength", "Length:", -352)
-    CreateRow("session", "sessionQuests", "Quests:", -370)
-    CreateRow("session", "sessionKills", "Kills:", -388)
-    CreateRow("session", "sessionTopMobType", "Top type:", -406)
-    CreateRow("session", "sessionDamage", "Damage:", -424)
-    CreateRow("session", "sessionExperience", "XP:", -442)
-    CreateRow("session", "sessionExpPerHour", "XP/hr:", -460)
-    CreateRow("session", "sessionMoney", "Looted coin:", -478)
-    CreateRow("session", "sessionQuestGold", "Quest gold:", -496)
-    CreateRow("session", "sessionGoldPerHour", "Gold/hr:", -514)
-    CreateRow("session", "sessionVendorValue", "Vendor value:", -532)
-    CreateRow("session", "sessionItems", "Items:", -550)
-    CreateRow("session", "sessionGreens", "Greens:", -568, GREEN)
-    CreateRow("session", "sessionBlues", "Blues:", -586, BLUE)
-    CreateRow("session", "sessionPurples", "Purples:", -604, PURPLE)
+    CreateSection("session", "Session", -310)
+    CreateRow("session", "sessionLength", "Length:", -334)
+    CreateRow("session", "sessionQuests", "Quests:", -352)
+    CreateRow("session", "sessionKills", "Kills:", -370)
+    CreateRow("session", "sessionDamage", "Damage:", -388)
+    CreateRow("session", "sessionExperience", "XP:", -406)
+    CreateRow("session", "sessionExpPerHour", "XP/hr:", -424)
+    CreateRow("session", "sessionMoney", "Looted coin:", -442)
+    CreateRow("session", "sessionQuestGold", "Quest gold:", -460)
+    CreateRow("session", "sessionGoldPerHour", "Gold/hr:", -478)
+    CreateRow("session", "sessionVendorValue", "Vendor value:", -496)
+    CreateRow("session", "sessionItems", "Items:", -514)
+    CreateRow("session", "sessionGreens", "Greens:", -532, GREEN)
+    CreateRow("session", "sessionBlues", "Blues:", -550, BLUE)
+    CreateRow("session", "sessionPurples", "Purples:", -568, PURPLE)
 
     ApplyTextSize()
     ApplyWindowOpacity()
@@ -1077,7 +965,7 @@ local function CreateMinimapButton()
         if button == "LeftButton" then
             ToggleWindow()
         else
-            Print("/llama, /llama settings, /llama top types, /llama opacity 0-100, /llama scale 50-200, /llama text 8-24")
+            Print("/llama, /llama settings, /llama opacity 0-100, /llama scale 50-200, /llama text 8-24")
         end
     end)
 
@@ -1102,9 +990,6 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("PLAYER_XP_UPDATE")
-eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
-eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
-eventFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 eventFrame:RegisterEvent("QUEST_TURNED_IN")
 eventFrame:RegisterEvent("PLAYER_DEAD")
 eventFrame:RegisterEvent("CHAT_MSG_MONEY")
@@ -1126,7 +1011,6 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         CreateMainWindow()
         CreateMinimapButton()
         CreateSettingsPanel()
-        RememberVisibleMobTypes()
         UpdateUI()
         Print("Ready. Use /llama")
         return
@@ -1134,17 +1018,6 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
 
     if event == "PLAYER_XP_UPDATE" then
         HandleExperienceUpdate()
-        return
-    end
-
-    if event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_MOUSEOVER_UNIT" then
-        RememberVisibleMobTypes()
-        return
-    end
-
-    if event == "NAME_PLATE_UNIT_ADDED" then
-        local unit = ...
-        RememberUnitMobType(unit)
         return
     end
 
@@ -1220,21 +1093,15 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         local args = { CombatLogGetCurrentEventInfo() }
         local subEvent = args[2]
         local sourceGUID = args[4]
-        local destGUID = args[8]
 
         local playerGUID = UnitGUID("player")
         local petGUID = UnitGUID("pet")
-
-        if destGUID then
-            RememberVisibleMobTypes()
-        end
 
         if subEvent == "PARTY_KILL" then
             local destName = args[9]
 
             if sourceGUID == playerGUID or sourceGUID == petGUID then
                 AddStat("mobsKilled", 1)
-                AddMobType(GetMobTypeForGuid(destGUID), 1)
 
                 if destName then
                     LlamaStatsDB.mobs[destName] = (LlamaStatsDB.mobs[destName] or 0) + 1
