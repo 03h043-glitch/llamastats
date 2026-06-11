@@ -1,8 +1,10 @@
-## Interface: 11507
+## Interface: 11200
 ## Title: LlamaStats
-## Notes: Per-character RuneScape-style stat tracker
-## Version: 0.6
-## SavedVariablesPerCharacter: LlamaStatsDB
+## Notes: Tracks XP, gold value, kills, and kill-type milestones in a compact movable window.
+## Author: LlamaStats
+## Version: 0.7
+## SavedVariables: LlamaStatsDB
 
 LlamaStats.lua
 LlamaStatsSessionButtons.lua
+LlamaStatsMinimapButton.lua
