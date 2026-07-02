@@ -1,11 +1,10 @@
 ## Interface: 11200
 ## Title: LlamaStats
-## Notes: Tracks XP, gold value, kills, milestones, and achievements in a compact movable window.
+## Notes: Tracks XP, gold value, kills, and kill-type milestones in a compact movable window.
 ## Author: LlamaStats
-## Version: 0.8
+## Version: 0.7
 ## SavedVariables: LlamaStatsDB
 
 LlamaStats.lua
 LlamaStatsSessionButtons.lua
 LlamaStatsMinimapButton.lua
-LlamaStatsAchievements.lua
