@@ -10,8 +10,6 @@ local RETRY_INTERVAL = 0.1
 local RETRY_LIMIT = 50
 local TOAST_HOLD_SECONDS = 1
 local TOAST_FADE_SECONDS = 0.6
-local MATERIAL_THRESHOLDS = { 50, 100, 200, 500, 1000 }
-local MATERIAL_FAMILIES = { "Cloth", "Leather", "Ore", "Herb" }
 
 local milestoneSets = {
     { category = "Currency", key = "moneyLooted", label = "Looted coin", thresholds = { 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000 }, money = true },
@@ -67,11 +65,6 @@ local function EnsureAchievementDB()
     LlamaStatsDB.milestones.lifetime = LlamaStatsDB.milestones.lifetime or {}
     LlamaStatsDB.achievements = LlamaStatsDB.achievements or {}
     LlamaStatsDB.achievements.unlocked = LlamaStatsDB.achievements.unlocked or {}
-    LlamaStatsDB.achievements.materialLoot = LlamaStatsDB.achievements.materialLoot or {}
-
-    for _, family in ipairs(MATERIAL_FAMILIES) do
-        LlamaStatsDB.achievements.materialLoot[family] = LlamaStatsDB.achievements.materialLoot[family] or {}
-    end
 end
 
 local function AchievementUnlocked(id)
@@ -103,6 +96,20 @@ local function SendAchievementChat(title, difficulty)
     if difficulty == "guild" and IsInGuild and IsInGuild() then
         SendChatMessage(message, "GUILD")
     end
+end
+
+local function CreateLine(parent, point, relativePoint, x, y, width)
+    local line = parent:CreateTexture(nil, "BORDER")
+    line:SetColorTexture(0.95, 0.75, 0.25, 1)
+    line:SetPoint(point, parent, relativePoint, x, y)
+    if point == "TOPLEFT" and relativePoint == "TOPRIGHT" then
+        line:SetHeight(1)
+    elseif point == "BOTTOMLEFT" and relativePoint == "BOTTOMRIGHT" then
+        line:SetHeight(1)
+    else
+        line:SetWidth(width or 1)
+    end
+    return line
 end
 
 local function CreateBorder(parent)
@@ -228,63 +235,6 @@ local function AddDefinition(list, category, id, title, description, unlocked, d
     })
 end
 
-local function ExtractItemLink(msg)
-    msg = msg or ""
-    local link = msg:match("(|c%x+|Hitem:[^|]+|h%[[^%]]+%]|h|r)")
-    if link then return link end
-    return msg:match("(|Hitem:[^|]+|h%[[^%]]+%]|h)")
-end
-
-local function ExtractQuantity(msg)
-    local qty = tonumber((msg or ""):match("x(%d+)"))
-    if qty and qty > 0 then return qty end
-    return 1
-end
-
-local function ShouldCountLootMessage(msg)
-    msg = string.lower(msg or "")
-    return string.find(msg, "you receive loot") ~= nil
-end
-
-local function ClassifyMaterial(itemName, itemType, itemSubType)
-    local name = string.lower(itemName or "")
-    local subType = string.lower(itemSubType or "")
-
-    if subType == "cloth" or string.find(name, "cloth") then return "Cloth" end
-    if subType == "leather" or string.find(name, "leather") or string.find(name, "hide") then return "Leather" end
-    if subType == "herb" then return "Herb" end
-    if string.find(name, "ore") then return "Ore" end
-
-    return nil
-end
-
-local function TrackMaterialLoot(msg, retrying)
-    if not ShouldCountLootMessage(msg) then return false end
-
-    local itemLink = ExtractItemLink(msg)
-    if not itemLink or not GetItemInfo then return false end
-
-    local itemName, _, _, _, _, itemType, itemSubType = GetItemInfo(itemLink)
-    if not itemName then
-        if not retrying and C_Timer and C_Timer.After then
-            C_Timer.After(0.3, function()
-                if TrackMaterialLoot(msg, true) then
-                    ScheduleLiveAchievementCheck()
-                end
-            end)
-        end
-        return false
-    end
-
-    local family = ClassifyMaterial(itemName, itemType, itemSubType)
-    if not family then return false end
-
-    EnsureAchievementDB()
-    local quantity = ExtractQuantity(msg)
-    LlamaStatsDB.achievements.materialLoot[family][itemName] = (LlamaStatsDB.achievements.materialLoot[family][itemName] or 0) + quantity
-    return true
-end
-
 local function AddMilestoneDefinitions(list)
     for _, set in ipairs(milestoneSets) do
         for _, threshold in ipairs(set.thresholds) do
@@ -293,35 +243,6 @@ local function AddMilestoneDefinitions(list)
             local title = set.label .. " - " .. valueText
             AddDefinition(list, set.category, id, title, "Reach lifetime " .. string.lower(set.label) .. " of " .. valueText .. ".", IsMilestoneReached(set.key, threshold))
         end
-    end
-end
-
-local function AddMaterialDefinitions(list)
-    local anyMaterials = false
-
-    for _, family in ipairs(MATERIAL_FAMILIES) do
-        local materials = LlamaStatsDB.achievements.materialLoot[family] or {}
-        local names = {}
-
-        for itemName in pairs(materials) do
-            table.insert(names, itemName)
-        end
-
-        table.sort(names)
-
-        for _, itemName in ipairs(names) do
-            anyMaterials = true
-            local count = tonumber(materials[itemName]) or 0
-            for _, threshold in ipairs(MATERIAL_THRESHOLDS) do
-                local id = "material:" .. family .. ":" .. itemName .. ":" .. threshold
-                local title = itemName .. " looted - " .. threshold
-                AddDefinition(list, "Materials - " .. family, id, title, "Loot " .. threshold .. " total " .. itemName .. ". Current: " .. count .. ".", count >= threshold)
-            end
-        end
-    end
-
-    if not anyMaterials then
-        AddDefinition(list, "Materials", "materials:none", "No material achievements yet", "Loot cloth, leather, ore, or herbs to reveal material achievements.", false)
     end
 end
 
@@ -378,7 +299,6 @@ local function BuildAchievementDefinitions()
     local list = {}
 
     AddMilestoneDefinitions(list)
-    AddMaterialDefinitions(list)
     AddMobTypeDefinitions(list)
 
     for _, requiredLevel in ipairs(limitedQuestLevels) do
@@ -533,20 +453,18 @@ local function AddAchievementButton()
     return true
 end
 
-function ScheduleLiveAchievementCheck()
+local function RunLiveAchievementCheck()
+    liveCheckQueued = false
+    SyncAchievementUnlocks(true)
+    if achievementFrame and achievementFrame:IsShown() then
+        RefreshAchievementWindow()
+    end
+end
+
+local function ScheduleLiveAchievementCheck()
     if liveCheckQueued then return end
     liveCheckQueued = true
-    if C_Timer and C_Timer.After then
-        C_Timer.After(0.1, function()
-            liveCheckQueued = false
-            SyncAchievementUnlocks(true)
-            if achievementFrame and achievementFrame:IsShown() then RefreshAchievementWindow() end
-        end)
-    else
-        liveCheckQueued = false
-        SyncAchievementUnlocks(true)
-        if achievementFrame and achievementFrame:IsShown() then RefreshAchievementWindow() end
-    end
+    if C_Timer and C_Timer.After then C_Timer.After(0.1, RunLiveAchievementCheck) else RunLiveAchievementCheck() end
 end
 
 local function StartRetry()
@@ -586,10 +504,6 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         CheckLimitedQuestAchievements(newLevel, true)
         if achievementFrame and achievementFrame:IsShown() then RefreshAchievementWindow() end
         return
-    end
-
-    if event == "CHAT_MSG_LOOT" then
-        TrackMaterialLoot(...)
     end
 
     ScheduleLiveAchievementCheck()
