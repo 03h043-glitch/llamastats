@@ -2,10 +2,9 @@
 ## Title: LlamaStats
 ## Notes: Tracks XP, gold value, kills, milestones, and achievements in a compact movable window.
 ## Author: LlamaStats
-## Version: 0.11
-## SavedVariables: LlamaStatsAccountDB, LlamaStatsDB
+## Version: 0.10
+## SavedVariables: LlamaStatsDB
 
-LlamaStatsCharacterDB.lua
 LlamaStats.lua
 LlamaStatsSessionButtons.lua
 LlamaStatsMinimapButton.lua
